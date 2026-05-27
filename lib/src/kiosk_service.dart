@@ -1,6 +1,7 @@
 import 'kiosk_mode_plugin.dart';
-import 'silent_update_plugin.dart';
+import 'models/kiosk_config.dart';
 import 'models/update_status.dart';
+import 'silent_update_plugin.dart';
 
 /// Unified facade over [KioskModePlugin] and [SilentUpdatePlugin].
 ///
@@ -13,7 +14,8 @@ class KioskService {
   Future<bool> isDeviceOwner() => _kioskMode.isDeviceOwner();
   Future<bool> isInKioskMode() => _kioskMode.isInKioskMode();
 
-  Future<void> enableKioskMode() => _kioskMode.enableKioskMode();
+  Future<void> enableKioskMode({KioskConfig? config}) =>
+      _kioskMode.enableKioskMode(config: config);
   Future<void> disableKioskMode() => _kioskMode.disableKioskMode();
 
   Future<void> enableAutoStart() => _kioskMode.enableAutoStart();
