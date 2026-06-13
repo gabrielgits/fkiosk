@@ -112,13 +112,11 @@ class SilentUpdateHandler(
                         val request = Request.Builder().url(url).build()
                         val response = client.newCall(request).execute()
                         val body = response.body?.string()
+                        // Parse off the main thread so a malformed/empty manifest
+                        // surfaces as an error instead of crashing the app's main looper.
+                        val map = if (body.isNullOrBlank()) null else parseJsonToMap(body)
                         android.os.Handler(android.os.Looper.getMainLooper()).post {
-                            if (body != null) {
-                                val map = parseJsonToMap(body)
-                                result.success(map)
-                            } else {
-                                result.success(null)
-                            }
+                            result.success(map)
                         }
                     } catch (e: Exception) {
                         android.os.Handler(android.os.Looper.getMainLooper()).post {
