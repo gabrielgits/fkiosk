@@ -9,7 +9,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 1. **Kiosk Mode** — Lock Task Mode via `DevicePolicyManager`, requires Device Owner.
 2. **Silent APK Updates** — Background install via `PackageInstaller`, progress reported through streams.
 
-Min SDK is Android 11 (API 30). Package is `ao.gabrielvieira.fkiosk`, plugin class `FKioskPlugin`.
+Min SDK is Android 7.0 (API 24), the floor set by `DevicePolicyManager.reboot()` and Flutter itself. Package is `ao.gabrielvieira.fkiosk`, plugin class `FKioskPlugin`.
+
+Fine-grained Lock Task feature customization (`setKioskFeatures`, and the `showStatusBar`/`showNotifications`/`enableHomeButton`/`enableOverviewButton`/`enablePowerButton` toggles on `KioskConfig`) requires `DevicePolicyManager.setLockTaskFeatures()`, which only exists from API 28 (Android 9) onward. Below that, `enableKioskMode`/`setKioskFeatures` still succeed — Lock Task Mode activates — but the toggles are silently ignored and the OS falls back to its default full lockdown. Same for `PackageInfo.getLongVersionCode()` (API 28+), guarded with a `versionCode` fallback in `SilentUpdateHandler`, and `WIPE_SILENTLY` (API 29+) in `wipeData()`. Guard any new API-gated call with `Build.VERSION.SDK_INT` the same way.
 
 See `ARCHITECTURE.md` for the full Android Enterprise design doc (platform channels, DPC setup, provisioning flows, API reference).
 

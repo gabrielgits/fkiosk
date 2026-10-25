@@ -183,7 +183,12 @@ class KioskModeHandler(
         if (additional != null) packages.addAll(additional)
 
         dpm.setLockTaskPackages(adminComponent, packages.toTypedArray())
-        dpm.setLockTaskFeatures(adminComponent, LockTaskFeatures.fromConfig(config))
+        // setLockTaskFeatures() was added in API 28 (Android 9). Below that,
+        // Lock Task Mode still works but is all-or-nothing (no customization
+        // API exists), so the fine-grained toggles are silently ignored.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            dpm.setLockTaskFeatures(adminComponent, LockTaskFeatures.fromConfig(config))
+        }
 
         currentActivity.startLockTask()
         eventSink?.success(true)
@@ -273,7 +278,8 @@ class KioskModeHandler(
         if (!dpm.isDeviceOwnerApp(activity!!.packageName)) {
             throw IllegalStateException("App is not Device Owner")
         }
-        val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+        // WIPE_SILENTLY was added in API 29 (Android 10).
+        val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             DevicePolicyManager.WIPE_SILENTLY
         } else {
             0
@@ -283,7 +289,9 @@ class KioskModeHandler(
     }
 
     private fun setFeatures(featureValues: List<Int>) {
-        dpm.setLockTaskFeatures(adminComponent, LockTaskFeatures.combinedFlags(featureValues))
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            dpm.setLockTaskFeatures(adminComponent, LockTaskFeatures.combinedFlags(featureValues))
+        }
     }
 
     // EventChannel.StreamHandler

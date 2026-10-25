@@ -3,6 +3,7 @@ package ao.gabrielvieira.fkiosk.update
 import android.app.admin.DevicePolicyManager
 import android.content.Context
 import android.content.pm.PackageInfo
+import android.os.Build
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import okhttp3.OkHttpClient
@@ -89,11 +90,19 @@ class SilentUpdateHandler(
                 try {
                     val packageInfo: PackageInfo = context.packageManager
                         .getPackageInfo(context.packageName, 0)
+                    // getLongVersionCode() was added in API 28; fall back to the
+                    // deprecated int field on older platforms.
+                    val versionCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                        packageInfo.longVersionCode
+                    } else {
+                        @Suppress("DEPRECATION")
+                        packageInfo.versionCode.toLong()
+                    }
                     result.success(
                         mapOf(
                             "packageName" to context.packageName,
                             "versionName" to (packageInfo.versionName ?: ""),
-                            "versionCode" to packageInfo.longVersionCode.toString(),
+                            "versionCode" to versionCode.toString(),
                         )
                     )
                 } catch (e: Exception) {

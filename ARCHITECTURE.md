@@ -33,14 +33,21 @@ This document describes the technical architecture for two Flutter plugins that 
 
 ### Target Devices
 
-- **Minimum: Android 11 (API 30)**
-- Android 11+ is required to leverage the full kiosk security model:
-  - Users cannot force-stop or clear app data in kiosk mode.
-  - All `setLockTaskFeatures()` customization APIs available (introduced in API 28).
-  - Scoped storage enforced - better filesystem security.
-  - Package visibility restrictions - kiosk app cannot be probed.
-  - More reliable `PackageInstaller` sessions for silent updates.
-- Dropping API 23-29 is acceptable because kiosk hardware is company-owned and controlled.
+- **Minimum: Android 7.0 (API 24)** — the floor of `DevicePolicyManager.reboot()`
+  and of Flutter itself.
+- Below Android 9 (API 28), Lock Task Mode still activates via
+  `setLockTaskPackages()` + `startLockTask()`, but it is all-or-nothing:
+  `setLockTaskFeatures()` doesn't exist yet, so the fine-grained toggles
+  (status bar, notifications, home, overview, power button) are silently
+  ignored and the OS falls back to full lockdown — the safest default.
+- Android 9+ (API 28+) unlocks the full customizable kiosk security model:
+  - All `setLockTaskFeatures()` customization APIs available.
+  - `PackageInfo.getLongVersionCode()` available (used with a fallback below
+    API 28).
+- Android 10+ (API 29+) adds `WIPE_SILENTLY` to `wipeData()`.
+- Android 11+ additionally brings scoped storage enforcement and package
+  visibility restrictions; they harden the device but the plugin doesn't
+  depend on them.
 
 ---
 
@@ -392,7 +399,7 @@ class KioskModeHandler(
         // Whitelist packages for Lock Task Mode
         dpm.setLockTaskPackages(adminComponent, packages.toTypedArray())
 
-        // Configure Lock Task features (available since API 28, minSdk is 30)
+        // Configure Lock Task features (available since API 28, guarded below that)
         var flags = DevicePolicyManager.LOCK_TASK_FEATURE_NONE
         if (config?.get("showStatusBar") == true)
             flags = flags or DevicePolicyManager.LOCK_TASK_FEATURE_SYSTEM_INFO
@@ -1124,7 +1131,7 @@ jobs:
 <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
 <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-<!-- WRITE_EXTERNAL_STORAGE not needed: minSdk 30 uses scoped storage -->
+<!-- WRITE_EXTERNAL_STORAGE not needed: APKs are downloaded to the app cache dir -->
 ```
 
 ### Useful ADB Commands for Development
@@ -1182,7 +1189,7 @@ flutter:
 android {
     compileSdk = 34
     defaultConfig {
-        minSdk = 30  // Android 11+ required for full kiosk security
+        minSdk = 24  // Android 7.0+; fine-grained kiosk feature toggles need API 28+
         targetSdk = 34
     }
 }

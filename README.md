@@ -2,7 +2,7 @@
 
 A Flutter plugin for **Android Enterprise** kiosk deployments. Exposes Lock Task Mode and silent APK install/update for COSU (Corporate Owned, Single Use) devices where the app is the Device Owner.
 
-> Android-only. Requires Android 11+ (API 30) and Device Owner privileges.
+> Android-only. Requires Android 7.0+ (API 24) and Device Owner privileges.
 
 ## Features
 
@@ -13,7 +13,7 @@ A Flutter plugin for **Android Enterprise** kiosk deployments. Exposes Lock Task
 ## Requirements
 
 - Flutter `>=3.10.0`, Dart `>=3.0.0 <4.0.0`
-- Android 11+ (API 30+)
+- Android 7.0+ (API 24+); kiosk feature toggles need Android 9+ (API 28+)
 - App provisioned as **Device Owner** (zero-touch, QR provisioning, or `adb shell dpm set-device-owner`)
 
 ## Installation
