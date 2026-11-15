@@ -4,63 +4,78 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-`fkiosk` is a Flutter plugin (Android-only) exposing two features for Android Enterprise COSU deployments:
+`fkiosk` is an Android-only Flutter plugin for Android Enterprise COSU (Corporate Owned, Single Use) deployments where the host app is the **Device Owner**:
 
-1. **Kiosk Mode** — Lock Task Mode via `DevicePolicyManager`, requires Device Owner.
-2. **Silent APK Updates** — Background install via `PackageInstaller`, progress reported through streams.
+1. **Kiosk Mode** — Lock Task Mode via `DevicePolicyManager`, plus device control (reboot, shutdown, auto-start on boot, hide/uninstall apps, wipe, clear device owner).
+2. **Silent updates** — background APK install/uninstall via `PackageInstaller` (from a local path or a URL), remote update-manifest checks, progress reported through a stream.
 
-Min SDK is Android 7.0 (API 24), the floor set by `DevicePolicyManager.reboot()` and Flutter itself. Package is `ao.gabrielvieira.fkiosk`, plugin class `FKioskPlugin`.
+Package `ao.gabrielvieira.fkiosk`, plugin class `FKioskPlugin`. minSdk 24, compileSdk 34, JVM target 17. Consumed as a git dependency (see `README.md` for the public Dart API and usage examples).
 
-Fine-grained Lock Task feature customization (`setKioskFeatures`, and the `showStatusBar`/`showNotifications`/`enableHomeButton`/`enableOverviewButton`/`enablePowerButton` toggles on `KioskConfig`) requires `DevicePolicyManager.setLockTaskFeatures()`, which only exists from API 28 (Android 9) onward. Below that, `enableKioskMode`/`setKioskFeatures` still succeed — Lock Task Mode activates — but the toggles are silently ignored and the OS falls back to its default full lockdown. Same for `PackageInfo.getLongVersionCode()` (API 28+), guarded with a `versionCode` fallback in `SilentUpdateHandler`, and `WIPE_SILENTLY` (API 29+) in `wipeData()`. Guard any new API-gated call with `Build.VERSION.SDK_INT` the same way.
+### API-level guards
 
-See `ARCHITECTURE.md` for the full Android Enterprise design doc (platform channels, DPC setup, provisioning flows, API reference).
+minSdk 24 is the floor of `DevicePolicyManager.reboot()` and Flutter. Several APIs are newer and must stay behind `Build.VERSION.SDK_INT` checks:
+
+- `setLockTaskFeatures()` (API 28+) — backs `setKioskFeatures` and the `KioskConfig` toggles (`showStatusBar`, `showNotifications`, `enableHomeButton`, `enableOverviewButton`, `enablePowerButton`). Below 28, Lock Task still activates but the toggles are silently ignored (OS falls back to full lockdown).
+- `PackageInfo.getLongVersionCode()` (API 28+) — falls back to `versionCode` in `SilentUpdateHandler`.
+- `WIPE_SILENTLY` (API 29+) — in `wipeData()`.
+
+Guard any new API-gated call the same way.
 
 ## Commands
 
 ```bash
-flutter pub get                        # install deps
-flutter analyze                        # lint (flutter_lints)
-flutter test                           # run all Dart unit tests
-flutter test test/kiosk_mode_plugin_test.dart   # single test file
-flutter test --name "enableKioskMode"  # single test by name
+flutter pub get
+flutter analyze                                   # lint (flutter_lints)
+flutter test                                      # all Dart unit tests
+flutter test test/kiosk_mode_plugin_test.dart     # single file
+flutter test --name "enableKioskMode"             # single test by name
 
-# Example app (for manual testing on a device)
+# Example app — manual testing on a real (Device Owner) device
 cd example && flutter run
+adb shell dpm set-device-owner <pkg>/<AdminReceiver component>   # provision for testing
 ```
 
-There is no Android unit test suite — native Kotlin code is exercised only through the Flutter test mocks and the example app on real hardware.
+There is no Android/Kotlin unit test suite. Dart tests in `test/` mock the MethodChannels; native code is exercised only via the example app (`example/integration_test/` has a basic integration test) on real hardware.
 
 ## Architecture
 
 ### Dart ↔ Kotlin wiring
 
-`FKioskPlugin.kt` registers four channels on attach:
+`FKioskPlugin.kt` creates four channels in `onAttachedToEngine`:
 
-- `ao.gabrielvieira.fkiosk/kiosk_mode` (MethodChannel) → `KioskModeHandler`
-- `ao.gabrielvieira.fkiosk/kiosk_mode_events` (EventChannel) → `KioskModeHandler` (also implements `StreamHandler`)
-- `ao.gabrielvieira.fkiosk/silent_update` (MethodChannel) → `SilentUpdateHandler`
-- `ao.gabrielvieira.fkiosk/update_events` (EventChannel) → `UpdateEventEmitter` (singleton)
+| Channel | Type | Kotlin handler |
+|---|---|---|
+| `ao.gabrielvieira.fkiosk/kiosk_mode` | MethodChannel | `KioskModeHandler` |
+| `ao.gabrielvieira.fkiosk/kiosk_mode_events` | EventChannel | `KioskModeHandler` (also a `StreamHandler`) |
+| `ao.gabrielvieira.fkiosk/silent_update` | MethodChannel | `SilentUpdateHandler` |
+| `ao.gabrielvieira.fkiosk/update_events` | EventChannel | `UpdateEventEmitter` (Kotlin `object`) |
 
-The kiosk handler is **ActivityAware** — it is only wired up inside `onAttachedToActivity` because `startLockTask`/`stopLockTask` need an `Activity`. The update handler only needs `Context` and is wired in `onAttachedToEngine`. When working on kiosk features, remember the handler can briefly have a null activity during config changes (`setActivity(null)` is called in the detached callbacks).
+- The **update** handlers only need a `Context` and are bound in `onAttachedToEngine`.
+- The **kiosk** handlers are bound later, in `onAttachedToActivity` (plugin is `ActivityAware`), because `startLockTask`/`stopLockTask` need an `Activity`. Before attach, kiosk calls go unanswered; during config changes `setActivity(null)` is called and every method except `isDeviceOwner` returns `NO_ACTIVITY`.
+- Channel names are literal strings duplicated in Dart (`lib/src/*_plugin.dart`), Kotlin (`FKioskPlugin.kt`) and the tests. Renaming one means updating all three.
 
-### Kotlin package layout (`android/src/main/kotlin/ao/gabrielvieira/fkiosk/`)
+### Admin component resolution
 
-- `FKioskPlugin.kt` — channel registration and lifecycle only; no business logic.
-- `kiosk/` — `KioskModeHandler` (MethodChannel + StreamHandler), `KioskActivity` (declared with `android:lockTaskMode="if_whitelisted"`), `LockTaskFeatures` (bitflag helpers mapping `KioskConfig` → `DevicePolicyManager.LOCK_TASK_FEATURE_*`).
-- `update/` — `SilentUpdateHandler` (MethodChannel), `PackageInstallerHelper` (session create/write/commit), `UpdateReceiver` (BroadcastReceiver for `ACTION_INSTALL_STATUS` / `ACTION_UNINSTALL_STATUS`), `UpdateEventEmitter` (singleton `StreamHandler` — receiver posts status events through it).
-- `dpc/` — `AdminReceiver` (extends `DeviceAdminReceiver`, declared in manifest with `BIND_DEVICE_ADMIN`) and `DevicePolicyHelper`. `AdminReceiver.getComponentName(context)` is the canonical way to get the admin `ComponentName`; use it rather than constructing one by hand.
-- `boot/BootReceiver.kt` — `BOOT_COMPLETED` receiver, **disabled by default** in the manifest (`android:enabled="false"`); enable programmatically if the consuming app wants auto-start.
+`setupKioskHandler` resolves the admin `ComponentName` from `dpm.activeAdmins` (the first admin belonging to the host app's package) and only falls back to the plugin's own `AdminReceiver`. Host apps commonly register their *own* `DeviceAdminReceiver` as device owner; passing the plugin's stub receiver to `setLockTaskPackages`/`setLockTaskFeatures` would then throw `SecurityException`. Reuse the `adminComponent` held by `KioskModeHandler` instead of calling `AdminReceiver.getComponentName()` directly in new DPM calls.
 
-### Dart layer (`lib/src/`)
+### Kotlin layout (`android/src/main/kotlin/ao/gabrielvieira/fkiosk/`)
 
-`fkiosk.dart` is a barrel that re-exports the two plugin classes and the three models (`KioskConfig`, `UpdateStatus`, `DeviceInfo`). Consumers should import `package:fkiosk/fkiosk.dart` only. The two plugin classes (`KioskModePlugin`, `SilentUpdatePlugin`) are thin MethodChannel wrappers — keep business logic on the Kotlin side.
+- `FKioskPlugin.kt` — channel registration and lifecycle only.
+- `kiosk/` — `KioskModeHandler` (all kiosk + device-control methods), `LockTaskFeatures` (maps `KioskConfig`/`KioskFeature` → `LOCK_TASK_FEATURE_*` bitflags), `KioskActivity` (declared `lockTaskMode="if_whitelisted"`; only used if the plugin launches its own kiosk shell — the host's main activity doesn't need it).
+- `update/` — `SilentUpdateHandler`, `PackageInstallerHelper` (session create/write/commit), `UpdateReceiver` (system-instantiated receiver for install/uninstall status), `UpdateEventEmitter`.
+- `dpc/` — `AdminReceiver` (stub `DeviceAdminReceiver`), `DevicePolicyHelper`.
+- `boot/BootReceiver.kt` — `BOOT_COMPLETED` receiver, **disabled in the manifest** (`android:enabled="false"`); `enableAutoStart`/`disableAutoStart` toggle it with `setComponentEnabledSetting` by its fully-qualified class name (keep that string in sync if it moves).
 
-### Channel naming
+### Dart layer (`lib/`)
 
-All channel names are literal strings duplicated in Dart and Kotlin. If you rename a channel, grep for the exact string (e.g. `ao.gabrielvieira.fkiosk/silent_update`) and update both sides plus any tests that mock it.
+`lib/fkiosk.dart` is the barrel; consumers import only `package:fkiosk/fkiosk.dart`. It exports:
+
+- `KioskModePlugin`, `SilentUpdatePlugin` — thin MethodChannel/EventChannel wrappers; keep logic on the Kotlin side.
+- `KioskService` — a facade over both plugins. When adding a plugin method, decide whether it should also be exposed here.
+- Models: `KioskConfig` (+ `KioskFeature`), `UpdateStatus` (+ `UpdateInfo`), `DeviceInfo`.
 
 ## Conventions
 
-- Device Owner is a hard precondition for every kiosk call — handlers should check `isDeviceOwner()` and fail loudly rather than silently no-op.
-- `UpdateEventEmitter` is a Kotlin `object` (singleton) because `UpdateReceiver` is instantiated by the system and needs a static sink to post events to. Don't convert it to a class.
-- The kiosk `KioskActivity` uses `lockTaskMode="if_whitelisted"` — the consuming app's main activity does not need this; it's only used when the plugin launches its own kiosk shell.
+- **Never block the platform thread.** Network/IO work in handlers (`installFromUrl` download, `checkForUpdate` manifest fetch/parse) runs on a background `Thread`, and `result.success/error` is posted back via `Handler(Looper.getMainLooper())`. A crash from parsing the update manifest on the main thread was fixed this way — follow the same pattern for any new slow call.
+- Device Owner is a hard precondition for kiosk/DPM calls — fail loudly with a `result.error(...)` rather than silently no-op.
+- `UpdateEventEmitter` must stay a Kotlin `object`: `UpdateReceiver` is created by the system and needs a static sink to post status events to.

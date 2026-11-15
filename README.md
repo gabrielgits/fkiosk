@@ -115,10 +115,6 @@ await kiosk.enableAutoStart();   // start app on BOOT_COMPLETED
 await kiosk.disableAutoStart();
 ```
 
-## Architecture
-
-See [ARCHITECTURE.md](ARCHITECTURE.md) for platform channel layout, DPC setup, and provisioning flows.
-
 ## License
 
 See [LICENSE](LICENSE).
